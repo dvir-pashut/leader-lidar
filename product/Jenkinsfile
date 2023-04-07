@@ -1,0 +1,347 @@
+void runtests(int num){
+    sh"""
+        # running the tests found in the tests.txt file
+        mv tests-$num tests.txt 
+        java -cp \$(ls | grep telemetry):\$(ls | grep analytics):simulator.jar com.lidar.simulation.Simulator
+    """
+}
+void spliting_tests() {
+        sh """
+            mv tests.txt tests
+
+            file=tests
+
+            num_lines=\$(wc -l "\$file" | awk '{print \$1}')
+            lines_per_file=\$((num_lines / 5))
+            remainder=\$((num_lines % 5))
+
+            prefix=tests
+
+            split -l \$lines_per_file -d -a 1 "\$file" "\$prefix-"
+
+            if [[ \$remainder -ne 0 ]]; then
+                for i in \$(seq 1 \$remainder); do
+                    tail -n 1 "\$prefix-\$((\$i-1))" >> "\$prefix-\$i"
+                    sed -i '\$d' "\$prefix-\$((\$i-1))"
+                done
+            fi
+        """
+    }
+def repoName = 'lider-product'
+def logsUrl = env.BUILD_URL + 'console' 
+def e2e_in_commit
+pipeline{
+    agent any
+    
+    options {
+        timestamps()
+        timeout(time:5, unit:'MINUTES')
+        buildDiscarder(logRotator(
+            numToKeepStr: '4',
+            daysToKeepStr: '7',
+            artifactNumToKeepStr: '30'
+        ))
+    // set gitlab connection where to sent an update
+    gitLabConnection('local repo')
+    }
+    tools {
+        maven "maven 3.6.2"
+        jdk "java 8 kit"
+    }
+    stages{
+        stage("checkout"){
+            steps{
+                echo "========checking out (loking hella fine)========"
+                deleteDir()
+                checkout scm
+                sh "mvn clean"
+                sh "git checkout ${GIT_BRANCH}"
+            }
+        }
+         stage('SonarQube Analysis') {
+            steps{
+                withCredentials( [usernamePassword( credentialsId: 'sonarqube', 
+                                      usernameVariable: 'USERNAME', 
+                                      passwordVariable: 'PASSWORD')]) {
+                    withMaven {
+                        configFileProvider([configFile(fileId: '0a5edd42-4379-4509-a49e-d8ba1384edeb', variable: 'set')]) {
+                            sh "mvn sonar:sonar -Dsonar.login=${USERNAME} -Dsonar.password=${PASSWORD}" 
+                        } 
+                    } // withMaven will discover the generated Maven artifacts, JUnit Surefire & FailSafe reports and FindBugs reports
+                }
+            }
+        }
+        stage("Calculate and set 3-number version"){
+            when{
+                anyOf {
+                    branch "release/*"
+                }
+            }
+            steps{
+                echo "========Calculate and set 3-number version========"
+                withMaven {
+                    configFileProvider([configFile(fileId: '0a5edd42-4379-4509-a49e-d8ba1384edeb', variable: 'set')]) {
+                        withCredentials( [usernamePassword( credentialsId: 'artifactory', 
+                                      usernameVariable: 'USERNAME', 
+                                      passwordVariable: 'PASSWORD')]) {
+                            script{
+                                sh """
+                                
+                                NEXTVERSION=\$(git describe --tags | cut -d '-' -f1 | awk -F. -v OFS=. '{\$NF += 1 ; print}')
+                                
+                                if [ \$NEXTVERSION ] 
+                                then
+                                    NEXTVERSION=\$(git describe --tags | cut -d '-' -f1 | awk -F. -v OFS=. '{\$NF += 1 ; print}')
+                                    echo "\${NEXTVERSION}" > v.txt
+                                else
+                                    NEXTVERSION="\$(git branch | grep '*'| cut -d '/' -f2).1"
+                                    echo "\$(git branch | grep '*'| cut -d '/' -f2).1" > v.txt
+                                fi
+                                
+                                nextnomatch=\$(echo \$NEXTVERSION | cut -d "." -f1,2)
+
+                                if [ \$nextnomatch != "\$(git branch | grep '*'| cut -d '/' -f2)" ]
+                                then
+                                NEXTVERSION="\$(git branch | grep '*'| cut -d '/' -f2).1"
+                                echo "\$(git branch | grep '*'| cut -d '/' -f2).1" > v.txt
+                                fi
+                                lastT=\$(curl -u ${USERNAME}:${PASSWORD} "http://10.208.0.8:8082/artifactory/libs-release-local/com/lidar/telemetry/" | grep ">\$(git branch | grep '*'| cut -d '/' -f2)" | tail -n 1 | cut -d '\"' -f 2 | cut -d '/' -f 1 )      
+                                lastA=\$(curl -u ${USERNAME}:${PASSWORD} "http://10.208.0.8:8082/artifactory/libs-release-local/com/lidar/analytics/" | grep ">\$(git branch | grep '*'| cut -d '/' -f2)" | tail -n 1 | cut -d '\"' -f 2 | cut -d '/' -f 1 )      
+
+                                
+                                mvn versions:set -DnewVersion=\$NEXTVERSION
+                                #mvn -s ${set}  versions:use-releases
+                                mvn -s ${set} versions:set-property -Dproperty=telemetry.version -DnewVersion="\$lastT"
+                                mvn -s ${set} versions:set-property -Dproperty=analytics.version -DnewVersion="\$lastA"
+                                mvn dependency:list
+                                """            
+                            }
+                        }
+                    }
+                }
+            }
+            post{
+                always{
+                    echo "========Calculate and set 3-number version finished========"
+
+                }
+                success{
+                    echo "========Calculate and set 3-number version executed successfully========"
+                }
+                failure{
+                    echo "========Calculate and set 3-number version execution failed========"
+                }
+            }
+        }
+        stage("build"){
+            when{
+                anyOf {
+                    branch "release/*"
+                }
+            }
+            steps{
+                echo "========executing build========"
+                
+                withMaven {
+                    configFileProvider([configFile(fileId: '0a5edd42-4379-4509-a49e-d8ba1384edeb', variable: 'set')]) {
+                        sh "mvn -s ${set} package"
+                    } 
+                } // withMaven will discover the generated Maven artifacts, JUnit Surefire & FailSafe reports and FindBugs reports
+                
+            }
+            post{
+                success{
+                    echo "========build executed successfully========"
+                }
+                failure{
+                    echo "========build execution failed========"
+                }
+            }
+        }
+        stage("e2e tests pre flight"){
+            when{
+                anyOf {
+                    branch "release/*"
+                }
+            }
+            steps{
+                echo "========executing e2e tests pre flight========"
+                script{
+                     withCredentials( [usernamePassword( credentialsId: 'artifactory', 
+                                      usernameVariable: 'USERNAME', 
+                                      passwordVariable: 'PASSWORD')]) {
+                        // build project
+                       sh """
+                        # grabbing the latest simulator
+                        wget http://10.208.0.8:8082/artifactory/libs-snapshot-local/com/lidar/simulator/99-SNAPSHOT/maven-metadata.xml --user=${USERNAME} --password=${PASSWORD}
+                        JAR_FILE=\$(xmllint --xpath 'string(//snapshotVersion[extension="jar"]/value)' maven-metadata.xml)
+                        wget -O simulator.jar http://10.208.0.8:8082/artifactory/libs-snapshot-local/com/lidar/simulator/99-SNAPSHOT/simulator-\${JAR_FILE}.jar --user=${USERNAME} --password=${PASSWORD}
+                        
+                        unzip target/leader-product-\$(cat v.txt)-leader-lidar.zip
+                       """
+                    }
+                    spliting_tests()
+                }
+            }
+            post{
+                always{
+                    echo "========e2e tests pre flight are done========"
+                }
+                success{
+                    echo "========e2e tests pre flight executed successfully========"
+                }
+                failure{
+                    echo "========e2e tests pre flight execution failed========"
+                }
+            }
+        }
+        stage('Run e2e tests Tests') {
+            when{
+                anyOf {
+                    branch "release/*"
+                }
+            }
+            parallel {
+                stage('TESTS1') {
+                    steps {
+                        script{
+                            runtests(0)
+                        }
+                    }
+                    post {
+                        always {
+                            echo "done"
+                        }
+                    }
+                }
+                stage('TESTS2') {
+                    steps {
+                        sh "sleep 1"
+                        runtests(1)
+                    }
+                    post {
+                        always {
+                            echo "done"
+                        }
+                    }
+                }
+                stage('TESTS3') {
+                    steps {
+                        sh "sleep 2"
+                        runtests(2)
+                    }
+                    post {
+                        always {
+                            echo "done"
+                        }
+                    }
+                }
+                stage('TESTS4') {
+                    steps {
+                        sh "sleep 3"
+                        runtests(3)
+                    }
+                    post {
+                        always {
+                            echo "done"
+                        }
+                    }
+                }
+                stage('TESTS5') {
+                    steps {
+                        sh "sleep 4"
+                        runtests(4)
+                    }
+                    post {
+                        always {
+                            echo "done"
+                        }
+                    }
+                }
+                stage('TESTS6') {
+                    steps {
+                        sh "sleep 5"
+                        runtests(5)
+                    }
+                    post {
+                        always {
+                            echo "done"
+                        }
+                    }
+                }
+            }
+        }
+        stage("publish "){
+            when{
+                anyOf {
+                    branch "release/*"
+                }
+            }
+            steps{
+                echo "========executing publishing to artifactory========"
+                withMaven {
+                    configFileProvider([configFile(fileId: '0a5edd42-4379-4509-a49e-d8ba1384edeb', variable: 'set')]) {
+                        sh "mvn -s ${set} deploy -DskipTests"
+                    } 
+                } 
+            }
+            post{
+                success{
+                    echo "========publish executed successfully========"
+                }
+                failure{
+                    echo "========publish execution failed========"
+                }
+            }
+        }
+         stage("push tag"){
+            when{
+                anyOf {
+                    branch "release/*"
+                }
+            }
+            steps{
+                echo "========executing pushing tag========"
+                script{
+                    sh "git tag \$(cat v.txt)"
+                    //sh "git remote set-url origin git@gitlab:gitlab-instance-24b2f4ed/suggest-lib.git"
+                    sh "git push origin \$(cat v.txt)"
+                }
+            }
+            post{
+                success{
+                    echo "========tags push executed successfully========"
+                }
+                failure{
+                    echo "========tags push execution failed========"
+                }
+            }
+        }
+    }
+    post{
+        always{
+            echo "========pipline done========"
+        }
+         success{
+            echo "========pipeline executed successfully ========"
+            
+            // updating the git status to the git reposetory 
+            updateGitlabCommitStatus name: "all good", state: "success"
+            slackSend(
+                color: 'good',
+                message: "Build succeeded on branch ${env.GIT_BRANCH} in ${repoName} repository . For more information, check the build logs: ${logsUrl}"
+            )
+
+        }
+        failure{
+            echo "========pipeline execution failed========"
+            
+            // updating the git status to the git reposetory 
+            updateGitlabCommitStatus name: "error", state: "failed"
+            slackSend(
+                color: 'danger',
+                message: "Build failed on branch ${env.GIT_BRANCH} in ${repoName} repository . For more information, check the build logs: ${logsUrl}"
+            )
+        }
+    }
+}
