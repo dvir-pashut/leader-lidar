@@ -32,7 +32,6 @@ def logsUrl = env.BUILD_URL + 'console'
 def e2e_in_commit
 pipeline{
     agent any
-    
     options {
         timestamps()
         timeout(time:5, unit:'MINUTES')

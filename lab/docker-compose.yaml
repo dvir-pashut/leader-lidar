@@ -1,0 +1,55 @@
+version: '3'
+
+services:  
+  
+  jenkins: 
+    container_name: jenknis
+    build: .
+    ports: 
+      - "8080:8080"
+      - "50000:50000"
+    restart: always
+    volumes: 
+      - /var/run/docker.sock:/var/run/docker.sock
+      - jenkins_data:/var/jenkins_home
+  gitlab:
+    container_name: gitlab
+    image: gitlab/gitlab-ce:15.8.5-ce.0
+    ports:
+      - "81:80"
+      - "443:443"
+      - "8085:22"
+    volumes:
+     - gitlab_data:/var/opt/gitlab
+     - gitlab_conf:/etc/gitlab
+     - gitlab_logs:/var/log/gitlab
+    shm_size: '256m'
+  artifactory:
+    container_name: artifactory
+    image: docker.bintray.io/jfrog/artifactory-oss:latest
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    volumes:
+      - artifactory-data:/var/opt/jfrog/artifactory
+
+  sonarqube:
+    image: sonarqube:9.9.0-community
+    hostname: sonarqube
+    container_name: sonarqube
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    ports:
+      - "9000:9000"
+
+volumes:
+    artifactory-data:
+    jenkins_data:
+    gitlab_data:
+    gitlab_conf:
+    gitlab_logs:
+    sonarqube_data:
+    sonarqube_extensions:
+    sonarqube_logs:

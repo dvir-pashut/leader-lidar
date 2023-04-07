@@ -1,5 +1,3 @@
-# leader-lidar
-
 LeaderLidar
 ===========
 
@@ -9,56 +7,45 @@ LeaderLidar is a car safety vendor. Their primary product, LeaderLidar, is compr
 
 The company releases their product as a zip file.
 
-You were recruited to help automate the company CI and Release processes. Following are your tasks:
+You were recruited to help automate the company CI and Release processes.
+ 
+for the full instractions refer to the task-instactions.txt file
 
-1. Setup a CI environment in AWS
-   - Gitlab. The company has 4 repositories
-     - telemetry
-     - analytics
-     - product
-     - testing
-   - Artifactory
-   - Jenkins
-2. Make sure that all 4 repos work with artifactory by:
-   - Set remote artifact repositories either via their `pom.xml`s or via `settings.xml` (see https://maven.apache.org/guides/introduction/introduction-to-repositories.html).
-   - Testing `mvn deploy`.
-   - If you fail on permissions, make sure you configure `.m2/settings.xml` with appropriate credentials.
-3. Create an MBP that performs both CI and Release according to the instructions below.
+# Main Things
 
-Continuous Integration (CI)
----------------------------
-telemetry:
-- Feature branches ("feature/...") should pass build and unit test for every commit (mvn package). If the commit message contains #e2e, End to end tests will also be executed using analytics:99-SNAPSHOT(see below).
-- Master always performs build, e2e tests and publish to artifactory (`mvn deploy -DskipTests`).
-- Release branches ("release/...") attempt a release (see below).
-analytics: same logic
-product:
-- Only "release/..." branches are CIed.
-testing:
-- Only Master branch on every commit performs build, e2e tests and publish to artifactory (`mvn deploy -DskipTests`).
+* Created a lab with Docker Compose (you can check the lab files in the "lab" folder).
 
-E2E Testing
------------
-- To execute testing you need to run simulator, making sure that simulator, telemetry and analytics jars are in its classpath (`java -cp <jar1>:<jar2>:<jar3> com.lidar.simulation.Simulator`).
-- Fetch the jars you want to test:
-  - For the product repo, you can find jars in the zip.
-  - For the analytics repo you can find one jar in the target folder and the other jar can be downloaded from artifactory using `wget`, `curl`, etc.
-- Simulator will run all tests found in `tests.txt` on its execution folder (you can use `tests-sanity.txt` initially, but the goal is to run `tests-full.txt`, and fast).
-- Simulator returns non zero for failed tests.
-- You may change the name of the provided test files to the filename the code uses.
+* Stored all the code on the hosted GitLab server.
 
-Release
--------
-- Versions `x.y.z` come from branch `release/x.y`:
-  - Fix version in pom to `x.y.z` (`mvn versions:set -DnewVersion=${YOUR_VERSION}`).
-  - If there are any other `com.lidar` dependencies, make sure they are on the same `x.y` with latest `z` (use `mvn dependency:list`).
-  - Build and unit test (`mvn package`).
-  - Analytics & product perform E2E tests. Telemetry does not.
-  - E2E test for repository:
-    - For analytics `x.y.z` use latest telemetry `x.y`.
-    - For product use the analytics and telemetry in the product zip.
-  - If all goes well:
-    - Publish to artifactory (`mvn deploy -DskipTests`).
-    - `git tag x.y.z`
+* Created pipelines according to the tasks.
+
+* Generated a settings.xml file from Artifactory, added the SonarQube setting to it, and then stored it in Jenkins.
+
+* Ran tests in parallel to save time (in this scenario, I reduced time by 60%~).
+
+* All the artifacts were sent to Artifactory, and the latest artifacts were pulled from there if needed.
+
+* Integrated Slack notifications to a Slack channel for every build.
+
+* Served all the labs with HTTPS.
+
+* Created a Jenkins user for developers with view permissions to check their build logs.
+
+* All the code was transferred through SonarQube to check the code quality.
 
 
+To use HTTPS in your lab, refer to [this repo] I created for scenarios like this.
+
+## Pictures
+  ![Slack](./images/slack.png)
+  ![Gitlab](./images/gitlab.png)
+  ![Artifactory](./images/artifactory.png)
+  ![Jenkins](./images/jenkins.png)
+  ![Jenkins2](./images/jenkins2.png)
+  ![Sonarqube](./images/sonarqube.png)
+
+
+
+[//]: # 
+
+[this repo]: <https://github.com/dvir-pashut/nginx-multiply-hosts>
